@@ -54,29 +54,70 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			if (words.length < 2) return;
+			
+			for (int i = 0; i < words.length - 1; i++) {
+				String word = words[i];
+				String nextWord = words[i + 1];
+				
+				// Clear the stripe for reuse
+				STRIPE.clear();
+				// Add the count for the next word
+				STRIPE.increment(nextWord);
+				
+				// Set the current word as key
+				KEY.set(word);
+				
+				// Emit the pair
+				context.write(KEY, STRIPE);
+			}
 		}
 	}
 
 	/*
 	 * TODO: write your reducer to aggregate all stripes associated with each key
 	 */
+	
 	private static class MyReducer extends
-			Reducer<Text, HashMapStringIntWritable, PairOfStrings, FloatWritable> {
+        Reducer<Text, HashMapStringIntWritable, PairOfStrings, FloatWritable> {
 
-		// Reuse objects.
-		private final static HashMapStringIntWritable SUM_STRIPES = new HashMapStringIntWritable();
-		private final static PairOfStrings BIGRAM = new PairOfStrings();
-		private final static FloatWritable FREQ = new FloatWritable();
+    // Reuse objects.
+    private final static HashMapStringIntWritable SUM_STRIPES = new HashMapStringIntWritable();
+    private final static PairOfStrings BIGRAM = new PairOfStrings();
+    private final static FloatWritable FREQ = new FloatWritable();
 
-		@Override
-		public void reduce(Text key,
-				Iterable<HashMapStringIntWritable> stripes, Context context)
-				throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-		}
-	}
+    @Override
+    public void reduce(Text key,
+            Iterable<HashMapStringIntWritable> stripes, Context context)
+            throws IOException, InterruptedException {
+        SUM_STRIPES.clear();
+        
+        // Sum up all stripes
+        for (HashMapStringIntWritable stripe : stripes) {
+            SUM_STRIPES.plus(stripe);
+        }
+        
+        // Calculate total count for normalization
+        float total = 0;
+        for (int count : SUM_STRIPES.values()) {
+            total += count;
+        }
+        
+        // First, emit the total count for this word
+        if (total > 0) {
+            BIGRAM.set(key.toString(), "");  // Empty second string for the total count
+            FREQ.set(total);  // Use the total as the frequency for this entry
+            context.write(BIGRAM, FREQ);
+            
+            // Then emit relative frequencies for each word in the stripe
+            for (Map.Entry<String, Integer> entry : SUM_STRIPES.entrySet()) {
+                BIGRAM.set(key.toString(), entry.getKey());
+                FREQ.set(entry.getValue() / total);
+                context.write(BIGRAM, FREQ);
+            }
+        }
+    }
+}
 
 	/*
 	 * TODO: Write your combiner to aggregate all stripes with the same key
@@ -94,6 +135,14 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			SUM_STRIPES.clear();
+			
+			// Sum up all stripes
+			for (HashMapStringIntWritable stripe : stripes) {
+				SUM_STRIPES.plus(stripe);
+			}
+			
+			context.write(key, SUM_STRIPES);
 		}
 	}
 

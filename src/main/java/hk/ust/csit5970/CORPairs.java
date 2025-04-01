@@ -43,6 +43,10 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
+		//
+		private final static IntWritable ONE = new IntWritable(1);
+        private final HashSet<String> uniqueWordsInLine = new HashSet<String>(); 
+        // private final List<String> sortedUniqueWords = new ArrayList<String>();   
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
@@ -50,9 +54,20 @@ public class CORPairs extends Configured implements Tool {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
 			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			// Count word frequencies
+			while (doc_tokenizer.hasMoreTokens()) {
+				String word = doc_tokenizer.nextToken();
+				Integer count = word_set.get(word);
+				if (count == null) {
+					count = 0;
+				}
+				word_set.put(word, count + 1);
+			}
+			// Emit (word, count) pairs
+			for (Map.Entry<String, Integer> entry : word_set.entrySet()) {
+				context.write(new Text(entry.getKey()), new IntWritable(entry.getValue()));
+			}
 		}
 	}
 
@@ -63,9 +78,13 @@ public class CORPairs extends Configured implements Tool {
 			Reducer<Text, IntWritable, Text, IntWritable> {
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			// Sum all values for the current key
+			int sum = 0;
+            for (IntWritable val : values) {
+                sum += val.get();
+            }
+            context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -74,13 +93,30 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
+		private final static IntWritable ONE = new IntWritable(1);
+		private final HashSet<String> uniqueWordsInLine = new HashSet<String>();
+
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			StringTokenizer doc_tokenizer = new StringTokenizer(value.toString().replaceAll("[^a-z A-Z]", " "));
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			Set<String> words = new HashSet<String>();
+			
+			// Generate all ordered word pairs from sorted document terms
+			while (doc_tokenizer.hasMoreTokens()) {
+				words.add(doc_tokenizer.nextToken());
+			}
+
+			List<String> wordList = new ArrayList<String>();
+			wordList.addAll(words);
+			Collections.sort(wordList);
+			// Emit each ordered word pair with count 1
+			for (int i = 0; i < wordList.size(); i++) {
+				for (int j = i + 1; j < wordList.size(); j++) {
+					PairOfStrings pair = new PairOfStrings(wordList.get(i), wordList.get(j));
+					context.write(pair, new IntWritable(1));
+				}
+			}
 		}
 	}
 
@@ -90,9 +126,13 @@ public class CORPairs extends Configured implements Tool {
 	private static class CORPairsCombiner2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, IntWritable> {
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			// Aggregate counts for each word pair
+			int sum = 0;
+            for (IntWritable val : values) {
+                sum += val.get();
+            }
+            context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -142,9 +182,24 @@ public class CORPairs extends Configured implements Tool {
 		 */
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			// Calculate word pair correlation score
+			int freqAB = 0;
+            for (IntWritable val : values) {
+                freqAB += val.get();
+            }
+
+            String leftWord = key.getLeftElement();
+            String rightWord = key.getRightElement();
+
+            int freqA = word_total_map.containsKey(leftWord) ? word_total_map.get(leftWord) : 0;
+            int freqB = word_total_map.containsKey(rightWord) ? word_total_map.get(rightWord) : 0;
+
+			// Compute and emit correlation if both words exist
+            if (freqA > 0 && freqB > 0) {
+                double correlation = (double) freqAB / (freqA * freqB);
+                context.write(key, new DoubleWritable(correlation));
+            }
 		}
 	}
 

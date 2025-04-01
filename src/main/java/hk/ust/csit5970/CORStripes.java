@@ -40,9 +40,11 @@ public class CORStripes extends Configured implements Tool {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
 			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			while (doc_tokenizer.hasMoreTokens()) {
+				String word = doc_tokenizer.nextToken().toLowerCase();
+				context.write(new Text(word), new IntWritable(1));
+			}
 		}
 	}
 
@@ -53,9 +55,12 @@ public class CORStripes extends Configured implements Tool {
 			Reducer<Text, IntWritable, Text, IntWritable> {
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			int sum = 0;
+			for (IntWritable value : values) {
+				sum += value.get();
+			}
+			context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -72,9 +77,22 @@ public class CORStripes extends Configured implements Tool {
 			while (doc_tokenizers.hasMoreTokens()) {
 				sorted_word_set.add(doc_tokenizers.nextToken());
 			}
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			List<String> wordList = new ArrayList<>(sorted_word_set);
+			
+			for (int i = 0; i < wordList.size(); i++) {
+				String word1 = wordList.get(i);
+				MapWritable stripe = new MapWritable();
+				
+				for (int j = i + 1; j < wordList.size(); j++) {
+					String word2 = wordList.get(j);
+					stripe.put(new Text(word2), new IntWritable(1));
+				}
+				
+				if (!stripe.isEmpty()) {
+					context.write(new Text(word1), stripe);
+				}
+			}
 		}
 	}
 
@@ -86,9 +104,24 @@ public class CORStripes extends Configured implements Tool {
 
 		@Override
 		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			MapWritable combined = new MapWritable();
+			
+			for (MapWritable value : values) {
+				for (Writable k : value.keySet()) {
+					Text word = (Text) k;
+					IntWritable count = (IntWritable) value.get(k);
+					
+					if (combined.containsKey(word)) {
+						IntWritable sum = (IntWritable) combined.get(word);
+						sum.set(sum.get() + count.get());
+					} else {
+						combined.put(word, new IntWritable(count.get()));
+					}
+				}
+			}
+			
+			context.write(key, combined);
 		}
 	}
 
@@ -142,6 +175,40 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			MapWritable combined = new MapWritable();
+			
+			// Combine all stripes
+			for (MapWritable value : values) {
+				for (Writable k : value.keySet()) {
+					Text word = (Text) k;
+					IntWritable count = (IntWritable) value.get(k);
+					
+					if (combined.containsKey(word)) {
+						IntWritable sum = (IntWritable) combined.get(word);
+						sum.set(sum.get() + count.get());
+					} else {
+						combined.put(word, new IntWritable(count.get()));
+					}
+				}
+			}
+			
+			// Get frequency of the current word
+			String word1 = key.toString();
+			Integer freq1 = word_total_map.get(word1);
+			
+			if (freq1 != null && freq1 > 0) {
+				// Calculate correlation for each co-occurring word
+				for (Writable k : combined.keySet()) {
+					String word2 = ((Text) k).toString();
+					Integer freq2 = word_total_map.get(word2);
+					
+					if (freq2 != null && freq2 > 0) {
+						int pairCount = ((IntWritable) combined.get(k)).get();
+						double cor = (double) pairCount / (freq1 * freq2);
+						context.write(new PairOfStrings(word1, word2), new DoubleWritable(cor));
+					}
+				}
+			}
 		}
 	}
 
